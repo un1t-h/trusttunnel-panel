@@ -1,0 +1,9 @@
+{
+  "name": "TrustTunnel Panel",
+  "short_name": "TT Panel",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#14161b",
+  "theme_color": "#14161b",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
