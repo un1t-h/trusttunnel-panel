@@ -46,7 +46,8 @@ type ServerStatus struct {
 	Uptime    int64     `json:"uptime"` // с
 	Conns     int       `json:"conns"`
 	Port      string    `json:"port"`
-	Metrics   string    `json:"metrics"` // on — статистика клиентов включена; partial — метрики без per_client; off
+	Metrics   string    `json:"metrics"`   // on — статистика клиентов включена; partial — метрики без per_client; off
+	LanAccess bool      `json:"lanAccess"` // allow_private_network_connections: клиенты могут ходить в частные сети через сервер
 	Error     string    `json:"error,omitempty"`
 	CheckedAt time.Time `json:"checkedAt"`
 }
@@ -69,6 +70,7 @@ echo load=$(cut -d' ' -f1 /proc/loadavg)
 awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{print "mem="(t-a)"/"t}' /proc/meminfo
 echo uptime=$(cut -d. -f1 /proc/uptime)
 echo conns=$(ss -Htn state established "( sport = :$P )" 2>/dev/null | wc -l)
+echo lan=$(sed -n 's/^[[:space:]]*allow_private_network_connections[[:space:]]*=[[:space:]]*\([a-z]*\).*/\1/p' vpn.toml 2>/dev/null | head -1)
 ` + metricsAddr + `echo metrics=$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://$MA/clients" 2>/dev/null)
 `
 	out, _, err := a.ssh.Run(s, script, "", 15*time.Second)
@@ -102,6 +104,8 @@ echo conns=$(ss -Htn state established "( sport = :$P )" 2>/dev/null | wc -l)
 			st.Uptime, _ = strconv.ParseInt(v, 10, 64)
 		case "conns":
 			st.Conns, _ = strconv.Atoi(strings.TrimSpace(v))
+		case "lan":
+			st.LanAccess = strings.TrimSpace(v) == "true"
 		case "metrics":
 			switch strings.TrimSpace(v) {
 			case "200":
@@ -114,6 +118,28 @@ echo conns=$(ss -Htn state established "( sport = :$P )" 2>/dev/null | wc -l)
 		}
 	}
 	return st
+}
+
+// setLanAccess меняет allow_private_network_connections в vpn.toml и перезапускает службу через 2 с.
+// Ключ верхнего уровня: если его нет, вставляем в начало файла (до первой таблицы).
+func (a *App) setLanAccess(s *Server, on bool) error {
+	val := "false"
+	if on {
+		val = "true"
+	}
+	cmd := ttPrelude(s) + `cp -p vpn.toml vpn.toml.bak
+if grep -q '^[[:space:]]*allow_private_network_connections' vpn.toml; then
+  sed -i 's/^[[:space:]]*allow_private_network_connections.*/allow_private_network_connections = ` + val + `/' vpn.toml
+else
+  sed -i '1i allow_private_network_connections = ` + val + `' vpn.toml
+fi
+systemd-run --quiet --on-active=2 --timer-property=AccuracySec=100ms systemctl restart trusttunnel 2>/dev/null ||
+  (nohup sh -c 'sleep 2; systemctl restart trusttunnel' >/dev/null 2>&1 &)`
+	out, errOut, err := a.ssh.Run(s, cmd, "", 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("не удалось изменить настройку: %v %s %s", err, strings.TrimSpace(out), strings.TrimSpace(errOut))
+	}
+	return nil
 }
 
 type cred struct{ Username, Password string }

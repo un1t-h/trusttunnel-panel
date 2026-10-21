@@ -155,6 +155,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .rate { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--accent); }
 .rate.up { color: var(--muted); }
 .strong { font-weight: 600; }
+.setting-row { display: flex; align-items: center; gap: 16px; }
+.setting-row .grow { flex: 1; min-width: 0; }
+.setting-row .muted { margin-top: 3px; }
 .avatar.sm .dot { width: 11px; height: 11px; border-width: 2px; }
 .kv .metric.wide { grid-column: span 2; }
 .kv .metric.wide .v { font-variant-numeric: tabular-nums; white-space: nowrap; }

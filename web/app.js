@@ -378,7 +378,7 @@ function updateLive() {
 /** «Отпечаток» структуры: если он не изменился, достаточно обновить статистику, а не всю страницу. */
 function structureSig() {
   return JSON.stringify([
-    S.state.servers.map(s => [s.id, s.name, s.publicAddress, s.status && [s.status.reachable, s.status.sshOk, s.status.installed, s.status.active, s.status.metrics]]),
+    S.state.servers.map(s => [s.id, s.name, s.publicAddress, s.status && [s.status.reachable, s.status.sshOk, s.status.installed, s.status.active, s.status.metrics, s.status.lanAccess]]),
     S.state.clients.map(c => { const l = liveOf(c); return [c.id, c.username, c.enabled, c.note, c.expiresAt, !!(l && l.online)]; }),
     S.state.statsErrors,
   ]);
@@ -548,11 +548,41 @@ function pageServer(id) {
         'Метрики будут доступны только локально на сервере (127.0.0.1), служба перезапустится на пару секунд.'),
       btn('Включить статистику', { kind: 'primary', icon: 'activity', onclick: e => enableStats(e.currentTarget, s) })));
   }
+  if (installed) {
+    const sw = h('input', { type: 'checkbox', checked: !!x.lanAccess });
+    sw.addEventListener('change', () => setLanAccess(s, sw));
+    parts.push(h('div', { class: 'card card-pad setting-row', style: { marginTop: '14px' } },
+      h('div', { class: 'grow' },
+        h('div', { class: 'strong' }, 'Доступ клиентов к локальной сети сервера'),
+        h('div', { class: 'muted small' },
+          'Разрешает клиентам ходить через VPN в частные сети (192.168.x.x, 10.x.x.x, 172.16–31.x.x) за сервером — ' +
+          'нужно для режима «локальные сети через VPN» в TrustTunnel GUI. Включайте, только если доверяете всем клиентам этого сервера.')),
+      h('label', { class: 'switch', title: x.lanAccess ? 'Запретить' : 'Разрешить' }, sw, h('span'))));
+  }
+
   const statsErr = S.state.statsErrors && S.state.statsErrors[s.id];
   if (statsErr) parts.push(h('div', { class: 'callout warn', style: { marginTop: '14px' } }, icon('alert'), h('div', null, statsErr)));
 
   parts.push(clientsSection(clientsOf(s.id), s));
   return h('div', null, parts);
+}
+
+async function setLanAccess(s, sw) {
+  const on = sw.checked;
+  const ok = await confirmDialog(on ? 'Разрешить доступ к локальной сети?' : 'Запретить доступ к локальной сети?',
+    (on ? 'Клиенты смогут подключаться через VPN к устройствам в частных сетях за сервером. '
+        : 'Клиенты больше не смогут ходить через VPN в частные сети за сервером. ') +
+    'Служба TrustTunnel перезапустится — клиенты переподключатся за пару секунд.', on ? 'Разрешить' : 'Запретить', on);
+  if (!ok) { sw.checked = !on; return; }
+  sw.disabled = true;
+  try {
+    await api('POST', `/servers/${s.id}/lan`, { enabled: on });
+    toast(on ? 'Доступ к локальной сети разрешён' : 'Доступ к локальной сети запрещён', 'ok');
+    await loadState();
+    refreshSoon(s.id);
+  } catch (e) { toast(e.message, 'err'); sw.checked = !on; }
+  sw.disabled = false;
+  render();
 }
 
 async function enableStats(b, s) {

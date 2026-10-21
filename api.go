@@ -142,6 +142,7 @@ func (a *App) routes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/servers/{id}/service", a.wrap(false, a.hService))
 	m.HandleFunc("GET /api/servers/{id}/logs", a.wrap(false, a.hLogs))
 	m.HandleFunc("POST /api/servers/{id}/metrics", a.wrap(false, a.hEnableMetrics))
+	m.HandleFunc("POST /api/servers/{id}/lan", a.wrap(false, a.hLanAccess))
 	m.HandleFunc("GET /api/jobs/{id}", a.wrap(false, a.hJob))
 
 	m.HandleFunc("POST /api/clients", a.wrap(false, a.hAddClient))
@@ -280,6 +281,38 @@ func (a *App) hEnableMetrics(w http.ResponseWriter, r *http.Request) (any, error
 		return nil, err
 	}
 	// служба перезапустится через 2 с — обновим статус чуть позже
+	go func() {
+		time.Sleep(5 * time.Second)
+		a.refreshOne(&s)
+	}()
+	return nil, nil
+}
+
+func (a *App) hLanAccess(w http.ResponseWriter, r *http.Request) (any, error) {
+	s, err := a.server(r.PathValue("id"))
+	if err != nil {
+		return nil, err
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		return nil, err
+	}
+	l := a.ssh.ServerLock(s.ID)
+	l.Lock()
+	err = a.setLanAccess(&s, req.Enabled)
+	l.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	// сразу отражаем новое значение, полный опрос — после перезапуска
+	a.stMu.Lock()
+	if st, ok := a.status[s.ID]; ok {
+		st.LanAccess = req.Enabled
+		a.status[s.ID] = st
+	}
+	a.stMu.Unlock()
 	go func() {
 		time.Sleep(5 * time.Second)
 		a.refreshOne(&s)
